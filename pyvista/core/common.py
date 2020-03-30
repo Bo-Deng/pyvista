@@ -13,7 +13,8 @@ import pyvista
 from pyvista.utilities import (CELL_DATA_FIELD, FIELD_DATA_FIELD,
                                POINT_DATA_FIELD, convert_array, get_array,
                                is_pyvista_dataset, parse_field_choice,
-                               raise_not_matching, vtk_bit_array_to_char)
+                               raise_not_matching, vtk_bit_array_to_char,
+                               vtk_id_list_to_array)
 
 from .filters import DataSetFilters
 
@@ -78,13 +79,13 @@ class DataObject(object):
         Parameters
         ----------
         arr : str, np.ndarray, optional
-            The name of the array to get the range. If None, the active scalar
-            is used
+            The name of the array to get the range. If None, the
+            active scalar is used
 
         preference : str, optional
-            When scalars is specified, this is the perfered array type to
-            search for in the dataset.  Must be either ``'point'``, ``'cell'``,
-            or ``'field'``.
+            When scalars is specified, this is the preferred array type
+            to search for in the dataset.  Must be either ``'point'``,
+            ``'cell'``, or ``'field'``.
 
         """
         raise NotImplementedError('{} mesh type does not have a `get_data_range` method.'.format(type(self)))
@@ -803,13 +804,13 @@ class Common(DataSetFilters, DataObject):
         Parameters
         ----------
         arr : str, np.ndarray, optional
-            The name of the array to get the range. If None, the active scalars
-            is used
+            The name of the array to get the range. If None, the
+            active scalars is used.
 
         preference : str, optional
-            When scalars is specified, this is the perfered array type to
-            search for in the dataset.  Must be either ``'point'``, ``'cell'``,
-            or ``'field'``.
+            When scalars is specified, this is the preferred array type
+            to search for in the dataset.  Must be either ``'point'``,
+            ``'cell'``, or ``'field'``.
 
         """
         if arr is None:
@@ -1005,8 +1006,9 @@ class Common(DataSetFilters, DataObject):
         self._active_scalars_info = ido.active_scalars_info
         self._active_vectors_info = ido.active_vectors_info
         if hasattr(ido, '_textures'):
-            self._textures = ido._textures
-
+            self._textures = {}
+            for name, tex in ido._textures.items():
+                self._textures[name] = tex.copy()
 
     @property
     def point_arrays(self):
@@ -1405,6 +1407,43 @@ class Common(DataSetFilters, DataObject):
         else:
             dataset = self
         return pyansys.CellQuality(dataset)
+
+
+    def find_closest_point(self, point, n=1):
+        """Find index of closest point in this mesh to the given point.
+
+        If wanting to query many points, use a KDTree with scipy or another
+        library as those implementations will be easier to work with.
+
+        See: https://github.com/pyvista/pyvista-support/issues/107
+
+        Parameters
+        ----------
+        point : iterable(float)
+            Length 3 coordinate of the point to query.
+
+        n : int, optional
+            If greater than ``1``, returns the indices of the ``n`` closest
+            points.
+
+        Return
+        ------
+        int : the index of the point in this mesh that is closes to the given point.
+        """
+        if not isinstance(point, collections.Iterable) or len(point) != 3:
+            raise TypeError("Given point must be a length three iterable.")
+        if not isinstance(n, int) or n < 1:
+            raise TypeError("`n` must be a positive integer.")
+        locator = vtk.vtkPointLocator()
+        locator.SetDataSet(self)
+        locator.BuildLocator()
+        if n < 2:
+            index = locator.FindClosestPoint(point)
+        else:
+            id_list = vtk.vtkIdList()
+            locator.FindClosestNPoints(n, point, id_list)
+            index = vtk_id_list_to_array(id_list)
+        return index
 
 
 
